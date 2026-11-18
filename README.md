@@ -45,4 +45,8 @@ Los parámetros se cambian en la sección de configuración al inicio de `eog_si
 
 ## Autores
 
-(Completar: nombres, cátedra, año.)
+Bernay, Manuela		43883032
+Saiki Alarcon, Esteban Nicolás	38330969
+Soruco, José Augusto		44281813
+
+10/11/2026
