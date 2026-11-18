@@ -1,0 +1,402 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Silla de ruedas virtual controlada por EOG</title>
+<style>
+  :root{
+    --bg:#f6f5f1; --card:#ffffff; --ink:#1f2328; --mut:#6b7280; --line:#e2e0d8;
+    --acc:#0f6e56; --accbg:#e1f5ee; --hor:#185fa5; --horbg:#e6f1fb; --ant:#993c1d; --antbg:#faece7; --warn:#a32d2d;
+  }
+  @media (prefers-color-scheme: dark){
+    :root{ --bg:#1b1c1e; --card:#26282b; --ink:#ececec; --mut:#9aa0a6; --line:#3a3d41;
+      --acc:#5dcaa5; --accbg:#12332a; --hor:#85b7eb; --horbg:#0f2740; --ant:#f0997b; --antbg:#3a1d12; --warn:#f09595; }
+  }
+  *{box-sizing:border-box}
+  body{margin:0;background:var(--bg);color:var(--ink);font:15px/1.45 system-ui,-apple-system,"Segoe UI",Roboto,sans-serif}
+  header{padding:14px 18px 6px}
+  h1{font-size:19px;margin:0 0 2px;font-weight:600}
+  header p{margin:0;color:var(--mut);font-size:13px}
+  main{display:grid;grid-template-columns:minmax(300px,380px) 1fr;gap:14px;padding:12px 18px 24px;max-width:1100px;margin:0 auto}
+  @media (max-width:760px){ main{grid-template-columns:1fr} }
+  .card{background:var(--card);border:1px solid var(--line);border-radius:12px;padding:12px}
+  .card h2{font-size:13px;margin:0 0 8px;color:var(--mut);font-weight:600;letter-spacing:.02em;text-transform:uppercase}
+  canvas{display:block;width:100%;height:auto;border-radius:8px}
+  .row{display:flex;gap:8px;flex-wrap:wrap;align-items:center}
+  button{font:inherit;padding:8px 12px;border-radius:8px;border:1px solid var(--line);background:var(--card);color:var(--ink);cursor:pointer}
+  button:hover{border-color:var(--acc)}
+  button.pri{background:var(--acc);color:#fff;border-color:var(--acc)}
+  @media (prefers-color-scheme: dark){ button.pri{color:#06241b} }
+  button.stop{border-color:var(--warn);color:var(--warn)}
+  button:disabled{opacity:.45;cursor:default}
+  .badge{display:inline-block;padding:3px 10px;border-radius:999px;font-weight:600;font-size:13px}
+  .b0{background:var(--line);color:var(--mut)} .bh{background:var(--horbg);color:var(--hor)} .ba{background:var(--antbg);color:var(--ant)} .bw{background:#fbeaea;color:var(--warn)}
+  .motors{display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-top:8px}
+  .motor{border:1px solid var(--line);border-radius:10px;padding:8px;text-align:center}
+  .motor .n{font-size:12px;color:var(--mut)}
+  .motor .v{font-size:22px;font-weight:700;height:30px}
+  .motor .p{font-size:11px;color:var(--mut)}
+  .pins{display:grid;grid-template-columns:repeat(4,1fr);gap:6px;margin-top:8px}
+  .pin{border:1px solid var(--line);border-radius:8px;text-align:center;padding:4px 0;font-size:12px;color:var(--mut)}
+  .pin.on{background:var(--accbg);color:var(--acc);border-color:var(--acc);font-weight:700}
+  #log{height:110px;overflow:auto;font:12px/1.4 ui-monospace,Menlo,Consolas,monospace;color:var(--mut);background:var(--bg);border-radius:8px;padding:8px;white-space:pre-wrap}
+  .ctl{display:grid;grid-template-columns:auto 1fr auto;gap:6px 10px;align-items:center;font-size:13px}
+  .ctl input[type=range]{width:100%}
+  .hint{font-size:12px;color:var(--mut);margin-top:6px}
+  .kv{display:flex;gap:16px;flex-wrap:wrap;font-size:13px;color:var(--mut)} .kv b{color:var(--ink);font-variant-numeric:tabular-nums}
+</style>
+</head>
+<body>
+<header>
+  <h1>Silla de ruedas virtual controlada por EOG</h1>
+  <p>Mirada a la derecha: giro horario. Mirada a la izquierda: giro antihorario. La silla gira sobre su eje con los dos motores en sentidos opuestos.</p>
+</header>
+
+<main>
+  <section class="card">
+    <h2>Silla vista desde arriba</h2>
+    <canvas id="silla" width="360" height="360"></canvas>
+    <div class="kv" style="margin-top:8px">
+      <span>Orden: <span id="orden" class="badge b0">Detenida</span></span>
+      <span>Rumbo: <b id="rumbo">0°</b></span>
+    </div>
+    <div class="motors">
+      <div class="motor"><div class="n">Motor izquierdo</div><div class="v" id="mIzq">—</div><div class="p" id="pIzq">detenido</div></div>
+      <div class="motor"><div class="n">Motor derecho</div><div class="v" id="mDer">—</div><div class="p" id="pDer">detenido</div></div>
+    </div>
+    <div class="pins" id="pins">
+      <div class="pin" id="pIN1">IN1 (6)</div><div class="pin" id="pIN2">IN2 (7)</div>
+      <div class="pin" id="pIN3">IN3 (8)</div><div class="pin" id="pIN4">IN4 (9)</div>
+    </div>
+    <div class="hint">Estado de los pines del puente H, igual al que tendrían los LED o los motores.</div>
+  </section>
+
+  <section style="display:flex;flex-direction:column;gap:14px">
+    <div class="card">
+      <h2>Señal en los electrodos (mV)</h2>
+      <canvas id="traza" width="720" height="260"></canvas>
+      <div class="hint">Ventana de 12 s. Las líneas punteadas son los umbrales de detección. La traza se pinta de color mientras la silla gira.</div>
+    </div>
+
+    <div class="card">
+      <h2>Fuente de la señal</h2>
+      <div class="row">
+        <button id="btnConectar" class="pri">Conectar Arduino</button>
+        <button id="btnDemo">Usar simulación</button>
+        <button id="btnStop" class="stop">Parada de emergencia</button>
+        <button id="btnReanudar">Reanudar</button>
+      </div>
+      <div class="hint" id="estadoFuente">Fuente: simulación. Para usar el Arduino, cargá eog_silla.ino y tocá «Conectar Arduino» (Chrome o Edge, 115200 baudios).</div>
+      <div id="panelSim" style="margin-top:10px">
+        <div class="row">
+          <button id="btnIzq">Mirar a la izquierda</button>
+          <button id="btnDer">Mirar a la derecha</button>
+          <button id="btnAuto">Demostración automática</button>
+          <button id="btnParp">Parpadeo</button>
+        </div>
+        <div class="hint">También se puede mantener apretada la flecha ← o → del teclado. El parpadeo es un pico corto: debe ser descartado.</div>
+        <div class="ctl" style="margin-top:8px">
+          <label for="sUmbral">Umbral</label><input type="range" id="sUmbral" min="0.10" max="0.80" step="0.01" value="0.30"><b id="vUmbral">0,30 mV</b>
+          <label for="sRuido">Ruido</label><input type="range" id="sRuido" min="0" max="0.15" step="0.005" value="0.04"><b id="vRuido">0,04 mV</b>
+        </div>
+      </div>
+    </div>
+
+    <div class="card">
+      <h2>Registro</h2>
+      <div id="log"></div>
+    </div>
+  </section>
+</main>
+
+<script>
+(() => {
+  "use strict";
+  // ------------------------------------------------------------------
+  //  Parámetros (los mismos que eog_silla.ino)
+  // ------------------------------------------------------------------
+  const P = { umbral: 0.30, confirm: 50, giro: 1000, maxGiro: 3000, refrac: 500, reposo: 150, espMax: 5000, sigueMirada: true };
+  const GRADOS_POR_SEG = 60;       // velocidad de giro de la silla virtual
+  const VENTANA_S = 12;
+
+  // ------------------------------------------------------------------
+  //  Estado
+  // ------------------------------------------------------------------
+  let fuente = "sim";              // "sim" o "serie"
+  let orden = 0;                   // +1 horario, -1 antihorario, 0 detenida
+  let rumbo = 0;                   // grados, 0 = hacia arriba
+  let bloqueada = false;
+  const traza = [];                // {t, mV, orden}
+  const logEl = document.getElementById("log");
+  const t0 = performance.now();
+  const ahoraMs = () => performance.now() - t0;
+
+  function log(msg){
+    const hh = (ahoraMs()/1000).toFixed(1).padStart(6," ");
+    logEl.textContent += hh + " s  " + msg + "\n";
+    logEl.scrollTop = logEl.scrollHeight;
+  }
+
+  // ------------------------------------------------------------------
+  //  Detector (copia de la máquina de estados del Arduino)
+  // ------------------------------------------------------------------
+  const det = { estado:"LISTO", tEst:0, cand:0, tRep:0, orden:0 };
+  function detStep(now, s){
+    // s > 0: mirada a la derecha
+    switch (det.estado) {
+      case "LISTO":
+        if (s > P.umbral)       { det.cand = +1; det.estado = "CONFIRMANDO"; det.tEst = now; }
+        else if (s < -P.umbral) { det.cand = -1; det.estado = "CONFIRMANDO"; det.tEst = now; }
+        break;
+      case "CONFIRMANDO": {
+        const sigue = det.cand > 0 ? s > P.umbral : s < -P.umbral;
+        if (!sigue) { det.estado = "LISTO"; log("Pico corto descartado"); }
+        else if (now - det.tEst >= P.confirm) {
+          if (!bloqueada) {
+            det.orden = det.cand; det.estado = "GIRANDO"; det.tEst = now;
+            log(det.cand > 0 ? "GIRO HORARIO" : "GIRO ANTIHORARIO");
+          } else { det.estado = "ESPERA"; det.tEst = now; det.tRep = 0; }
+        }
+        break; }
+      case "GIRANDO": {
+        const mant = det.orden > 0 ? (s > P.umbral * 0.5) : (s < -P.umbral * 0.5);
+        const fin = P.sigueMirada ? (!mant || now - det.tEst >= P.maxGiro) : (now - det.tEst >= P.giro);
+        if (fin || bloqueada) { det.orden = 0; det.estado = "ESPERA"; det.tEst = now; det.tRep = 0; }
+        break; }
+      case "ESPERA":
+        if (now - det.tEst >= P.refrac) {
+          if (Math.abs(s) < P.umbral * 0.5) {
+            if (!det.tRep) det.tRep = now;
+            if (now - det.tRep >= P.reposo) det.estado = "LISTO";
+          } else det.tRep = 0;
+          if (now - det.tEst >= P.refrac + P.espMax) det.estado = "LISTO";
+        }
+        break;
+    }
+    return det.orden;
+  }
+
+  // ------------------------------------------------------------------
+  //  Simulación de la señal EOG (pasaaltos de 0,05 Hz y pasabajos de 16 Hz)
+  // ------------------------------------------------------------------
+  const sim = { gaze:0, hpY:0, hpXprev:0, lpY:0, ruido:0.04, cola:[], teclas:{izq:false,der:false}, parp:0 };
+  const AMP_MV = 0.70;
+  function gazeObjetivo(now){
+    let g = 0;
+    if (sim.teclas.der) g += AMP_MV;
+    if (sim.teclas.izq) g -= AMP_MV;
+    // eventos programados {desde, hasta, valor}
+    sim.cola = sim.cola.filter(e => now < e.hasta);
+    for (const e of sim.cola) if (now >= e.desde) g += e.valor;
+    return g;
+  }
+  function simStep(now, dt){
+    const x = gazeObjetivo(now);
+    const tau = 3.2, a = tau / (tau + dt);
+    sim.hpY = a * (sim.hpY + x - sim.hpXprev); sim.hpXprev = x;
+    const tl = 1/(2*Math.PI*16), b = dt/(tl+dt);
+    sim.lpY += b * (sim.hpY - sim.lpY);
+    // ruido gaussiano aproximado
+    const n = (Math.random()+Math.random()+Math.random()+Math.random()-2) * 1.7;
+    return sim.lpY + sim.ruido * n;
+  }
+  function mirar(lado, dur=900){
+    const now = ahoraMs();
+    sim.cola.push({ desde: now, hasta: now + dur, valor: lado * AMP_MV });
+  }
+  function parpadeo(){
+    const now = ahoraMs();
+    sim.cola.push({ desde: now, hasta: now + 80, valor: 0.5 });
+  }
+  function demoAuto(){
+    setFuente("sim");
+    const secuencia = [ [0,+1], [4,-1], [8,+1], [11.5,"p"], [14,-1], [18,+1] ];
+    for (const [seg, v] of secuencia) setTimeout(() => v === "p" ? parpadeo() : mirar(v), seg*1000);
+    log("Demostración automática: derecha, izquierda, derecha, parpadeo, izquierda, derecha");
+  }
+
+  // ------------------------------------------------------------------
+  //  Bucle principal: 50 muestras por segundo
+  // ------------------------------------------------------------------
+  let tPrev = ahoraMs();
+  setInterval(() => {
+    const now = ahoraMs(), dt = (now - tPrev) / 1000; tPrev = now;
+    if (fuente === "sim") {
+      const mV = simStep(now, 0.02);
+      orden = detStep(now, mV);
+      traza.push({ t: now/1000, mV, orden });
+    }
+    rumbo = (rumbo + orden * GRADOS_POR_SEG * dt) % 360;
+    if (rumbo < 0) rumbo += 360;
+    while (traza.length && traza[0].t < now/1000 - VENTANA_S - 1) traza.shift();
+    actualizarPaneles();
+  }, 20);
+
+  // ------------------------------------------------------------------
+  //  Dibujo
+  // ------------------------------------------------------------------
+  const css = n => getComputedStyle(document.documentElement).getPropertyValue(n).trim();
+  const cvS = document.getElementById("silla"), cxS = cvS.getContext("2d");
+  const cvT = document.getElementById("traza"), cxT = cvT.getContext("2d");
+
+  function dibujarSilla(){
+    const w = cvS.width, h = cvS.height, cx = w/2, cy = h/2;
+    cxS.clearRect(0,0,w,h);
+    // piso
+    cxS.fillStyle = css("--bg"); cxS.fillRect(0,0,w,h);
+    cxS.strokeStyle = css("--line"); cxS.lineWidth = 1;
+    for (let i=0;i<=w;i+=30){ cxS.beginPath(); cxS.moveTo(i,0); cxS.lineTo(i,h); cxS.stroke(); cxS.beginPath(); cxS.moveTo(0,i); cxS.lineTo(w,i); cxS.stroke(); }
+    // marcas de giro
+    cxS.strokeStyle = orden>0 ? css("--hor") : orden<0 ? css("--ant") : css("--line");
+    cxS.lineWidth = 3; cxS.setLineDash([6,6]);
+    cxS.beginPath(); cxS.arc(cx,cy,135,0,Math.PI*2); cxS.stroke(); cxS.setLineDash([]);
+    if (orden !== 0){
+      const a = (rumbo-90)*Math.PI/180;
+      const ax = cx+135*Math.cos(a), ay = cy+135*Math.sin(a);
+      cxS.fillStyle = cxS.strokeStyle; cxS.beginPath(); cxS.arc(ax,ay,7,0,Math.PI*2); cxS.fill();
+    }
+    cxS.save(); cxS.translate(cx,cy); cxS.rotate(rumbo*Math.PI/180);
+    // ruedas
+    const rueda = (x, estado) => {
+      cxS.fillStyle = "#2b2d31"; roundRect(x-12,-52,24,104,6); cxS.fill();
+      cxS.fillStyle = estado>0 ? "#5dcaa5" : estado<0 ? "#f0997b" : "#55585e";
+      for (let k=-40;k<=40;k+=20){ cxS.fillRect(x-8,k-4,16,8); }
+    };
+    const izq = orden>0 ? +1 : orden<0 ? -1 : 0, der = -izq;
+    rueda(-62, izq); rueda(62, der);
+    // asiento y respaldo
+    cxS.fillStyle = "#8a9099"; roundRect(-46,-34,92,84,10); cxS.fill();
+    cxS.fillStyle = "#4b5058"; roundRect(-46,38,92,16,6); cxS.fill();
+    cxS.fillStyle = "#b9bec6"; roundRect(-32,-22,64,56,8); cxS.fill();
+    // apoyapies
+    cxS.fillStyle = "#4b5058"; roundRect(-22,-62,44,16,5); cxS.fill();
+    // flecha de frente
+    cxS.fillStyle = "#0f6e56"; cxS.beginPath(); cxS.moveTo(0,-82); cxS.lineTo(-12,-64); cxS.lineTo(12,-64); cxS.closePath(); cxS.fill();
+    cxS.restore();
+  }
+  function roundRect(x,y,w,h,r){
+    cxS.beginPath(); cxS.moveTo(x+r,y); cxS.arcTo(x+w,y,x+w,y+h,r); cxS.arcTo(x+w,y+h,x,y+h,r);
+    cxS.arcTo(x,y+h,x,y,r); cxS.arcTo(x,y,x+w,y,r); cxS.closePath();
+  }
+
+  function dibujarTraza(){
+    const w = cvT.width, h = cvT.height, padL = 46, padB = 22, padT = 8, padR = 10;
+    cxT.clearRect(0,0,w,h);
+    const rango = 1.2; // ±1,2 mV
+    const X = t => padL + (t - tMin) / VENTANA_S * (w - padL - padR);
+    const Y = v => padT + (1 - (v + rango) / (2*rango)) * (h - padT - padB);
+    const tMax = ahoraMs()/1000, tMin = tMax - VENTANA_S;
+    // grilla
+    cxT.font = "11px system-ui"; cxT.fillStyle = css("--mut"); cxT.strokeStyle = css("--line"); cxT.lineWidth = 1;
+    for (let v=-1; v<=1.001; v+=0.5){ const y=Y(v); cxT.beginPath(); cxT.moveTo(padL,y); cxT.lineTo(w-padR,y); cxT.stroke(); cxT.fillText(v.toFixed(1), 8, y+4); }
+    cxT.fillText("mV", 8, padT+8);
+    for (let s=0; s<=VENTANA_S; s+=2){ const x = padL + s/VENTANA_S*(w-padL-padR); cxT.fillText("-"+(VENTANA_S-s)+" s", x-12, h-6); }
+    // umbrales
+    cxT.setLineDash([5,5]); cxT.strokeStyle = css("--mut");
+    for (const u of [P.umbral, -P.umbral]){ cxT.beginPath(); cxT.moveTo(padL,Y(u)); cxT.lineTo(w-padR,Y(u)); cxT.stroke(); }
+    cxT.setLineDash([]);
+    // señal
+    cxT.lineWidth = 2; cxT.lineJoin = "round";
+    let prev = null;
+    for (const p of traza){
+      if (p.t < tMin) { prev = p; continue; }
+      if (prev){
+        cxT.strokeStyle = p.orden>0 ? css("--hor") : p.orden<0 ? css("--ant") : css("--acc");
+        cxT.beginPath(); cxT.moveTo(X(prev.t), Y(prev.mV)); cxT.lineTo(X(p.t), Y(p.mV)); cxT.stroke();
+      }
+      prev = p;
+    }
+  }
+
+  function actualizarPaneles(){
+    const b = document.getElementById("orden");
+    if (bloqueada){ b.className="badge bw"; b.textContent="Parada de emergencia"; }
+    else if (orden>0){ b.className="badge bh"; b.textContent="Giro horario"; }
+    else if (orden<0){ b.className="badge ba"; b.textContent="Giro antihorario"; }
+    else { b.className="badge b0"; b.textContent="Detenida"; }
+    document.getElementById("rumbo").textContent = Math.round(rumbo) + "°";
+    const set = (idV, idP, v) => {
+      document.getElementById(idV).textContent = v>0 ? "▲" : v<0 ? "▼" : "—";
+      document.getElementById(idP).textContent = v>0 ? "adelante" : v<0 ? "atrás" : "detenido";
+    };
+    const izq = orden>0 ? +1 : orden<0 ? -1 : 0;
+    set("mIzq","pIzq", izq); set("mDer","pDer", -izq);
+    document.getElementById("pIN1").classList.toggle("on", izq>0);
+    document.getElementById("pIN2").classList.toggle("on", izq<0);
+    document.getElementById("pIN3").classList.toggle("on", izq<0);
+    document.getElementById("pIN4").classList.toggle("on", izq>0);
+  }
+  (function anim(){ dibujarSilla(); dibujarTraza(); requestAnimationFrame(anim); })();
+
+  // ------------------------------------------------------------------
+  //  Controles
+  // ------------------------------------------------------------------
+  const el = id => document.getElementById(id);
+  function setFuente(f){
+    fuente = f;
+    el("panelSim").style.display = f === "sim" ? "" : "none";
+    el("estadoFuente").textContent = f === "sim"
+      ? "Fuente: simulación. Para usar el Arduino, cargá eog_silla.ino y tocá «Conectar Arduino» (Chrome o Edge, 115200 baudios)."
+      : "Fuente: Arduino por puerto serie. Los comandos de giro vienen del sketch.";
+    orden = 0; det.orden = 0; det.estado = "LISTO";
+  }
+  el("btnDemo").onclick = () => { setFuente("sim"); log("Fuente: simulación"); };
+  el("btnIzq").onclick = () => mirar(-1);
+  el("btnDer").onclick = () => mirar(+1);
+  el("btnParp").onclick = () => parpadeo();
+  el("btnAuto").onclick = demoAuto;
+  el("sUmbral").oninput = e => { P.umbral = +e.target.value; el("vUmbral").textContent = P.umbral.toFixed(2).replace(".",",") + " mV"; };
+  el("sRuido").oninput = e => { sim.ruido = +e.target.value; el("vRuido").textContent = sim.ruido.toFixed(2).replace(".",",") + " mV"; };
+  addEventListener("keydown", e => { if (e.key==="ArrowLeft") { sim.teclas.izq = true; e.preventDefault(); } if (e.key==="ArrowRight") { sim.teclas.der = true; e.preventDefault(); } });
+  addEventListener("keyup",   e => { if (e.key==="ArrowLeft") sim.teclas.izq = false; if (e.key==="ArrowRight") sim.teclas.der = false; });
+
+  let writer = null;
+  async function enviar(c){ if (writer) { try { await writer.write(new TextEncoder().encode(c)); } catch(e){} } }
+  el("btnStop").onclick = () => { bloqueada = true; orden = 0; det.orden = 0; enviar("p"); log("PARADA DE EMERGENCIA"); };
+  el("btnReanudar").onclick = () => { bloqueada = false; det.estado = "ESPERA"; det.tEst = ahoraMs(); det.tRep = 0; enviar("r"); log("Reanudado"); };
+
+  // ------------------------------------------------------------------
+  //  Arduino por puerto serie (Web Serial)
+  // ------------------------------------------------------------------
+  el("btnConectar").onclick = async () => {
+    if (!("serial" in navigator)) {
+      alert("Este navegador no permite puerto serie. Abrí la página en Chrome o Edge de escritorio.");
+      return;
+    }
+    try {
+      const port = await navigator.serial.requestPort();
+      await port.open({ baudRate: 115200 });
+      writer = port.writable.getWriter();
+      setFuente("serie");
+      log("Arduino conectado");
+      const dec = new TextDecoder(); let buf = "";
+      const reader = port.readable.getReader();
+      for (;;) {
+        const { value, done } = await reader.read();
+        if (done) break;
+        buf += dec.decode(value, { stream:true });
+        let i;
+        while ((i = buf.indexOf("\n")) >= 0) { procesarLinea(buf.slice(0,i).trim()); buf = buf.slice(i+1); }
+      }
+    } catch (err) { log("Puerto serie: " + err.message); }
+  };
+  function procesarLinea(l){
+    if (!l) return;
+    if (l[0] === "#") { log(l.slice(1).trim()); return; }
+    const d = {};
+    for (const kv of l.split(",")) { const [k,v] = kv.split(":"); if (k && v !== undefined) d[k.trim()] = parseFloat(v); }
+    if (d.Senal_mV === undefined) return;
+    orden = d.Orden || 0;
+    traza.push({ t: ahoraMs()/1000, mV: d.Senal_mV, orden });
+    if (d.Umbral) P.umbral = d.Umbral;
+  }
+
+  // demostración automática si la URL trae ?auto=1
+  if (location.search.includes("auto=1")) setTimeout(demoAuto, 600);
+  setFuente("sim");
+  log("Listo. Fuente: simulación.");
+})();
+</script>
+</body>
+</html>
