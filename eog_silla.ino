@@ -1,88 +1,29 @@
-/*
-  =====================================================================
-  EOG horizontal -> comandos de giro para una silla de ruedas de dos motores
-  Arduino Uno
-  =====================================================================
-  Base: digitalizador del compañero (promedio de lecturas, notch de 50 Hz,
-  promedio móvil). Se agregaron: calibración automática del centro, detector
-  de miradas por máquina de estados y las salidas hacia un puente H.
-
-  Qué hace, 250 veces por segundo:
-    1) Lee A0 varias veces y promedia.
-    2) Convierte cuentas a voltios y resta el centro de la señal.
-    3) Filtro notch contra la red (50 Hz) y promedio móvil corto.
-    4) Pasa la señal a milivolts en los electrodos (divide por la ganancia).
-    5) Detecta una mirada hacia un lado y decide la orden de giro:
-         mirada a la DERECHA   -> giro HORARIO     (orden +1)
-         mirada a la IZQUIERDA -> giro ANTIHORARIO (orden -1)
-    6) Pone las salidas del puente H y manda la telemetría por USB.
-
-  Por qué una máquina de estados y no un simple umbral:
-    Cada mirada produce DOS escalones de signo contrario: uno al mirar hacia
-    un lado y otro al volver al centro. Un umbral simple tomaría el escalón de
-    vuelta como la orden contraria. Por eso, después de cada giro el programa
-    ignora la señal un tiempo y espera a que vuelva al reposo.
-
-  Conexiones:
-    - Salida de R5 (SALIDA) -> A0   (con 100 nF entre A0 y GND)
-    - GND del circuito      -> GND del Arduino
-    - Puente H (por ejemplo L298N), ver los pines más abajo.
-      Sin motores se puede conectar un LED con resistencia de 330 ohm en cada
-      pin IN1..IN4 y ver cuál motor giraría y en qué sentido.
-
-  SEGURIDAD:
-    - El circuito no tiene aislamiento galvánico. Con electrodos puestos, el
-      Arduino NO debe quedar conectado por USB a una notebook enchufada:
-      usar la notebook a batería o un aislador USB.
-    - Antes de mover una silla real habría que agregar parada de emergencia
-      física, final de carrera y límite de velocidad. Este programa es para
-      la simulación y las pruebas de banco.
-
-  Cómo verlo: Arduino IDE -> Herramientas -> Serial Plotter, a 115200 baudios.
-  También se puede abrir silla_virtual.html en Chrome y conectar el puerto.
-
-  Comandos por el monitor serie (una letra):
-    p = parada de emergencia (bloquea las salidas)     r = reanudar
-*/
-
-
-// =====================================================================
-//  CONFIGURACIÓN: acá está todo lo que podés cambiar
-// =====================================================================
-
 // ---------- Referencia del ADC ----------
-//  Opción A (por defecto): 5 V del Arduino. Opción B: pin 3V3 conectado a AREF
-//  (más resolución, pero la señal nunca debe pasar de 3,3 V).
 const bool  USAR_AREF_EXTERNA = false;
 const float VREF_ADC          = 5.0;     // voltios
 
 // ---------- Centro de la señal (nivel de reposo de la salida) ----------
 // Valor inicial. Con CENTRO_AUTOMATICO el programa lo mide solo al arrancar
-// (en el circuito armado el reposo dio ~1,9 V y no los 1,65 V del diseño).
 const float CENTRO_V = 1.90;
 const bool  CENTRO_AUTOMATICO = true;
-const unsigned long ARRANQUE_MS = 8000;  // espera a que el pasaaltos se asiente (~2,5 constantes de tiempo)
+const unsigned long ARRANQUE_MS = 8000;  // espera a que el pasaaltos se asiente 
 const unsigned long CALIB_MS    = 2000;  // tiempo de promedio para medir el centro
 
 // ---------- Ganancia del circuito ----------
 // INA333 (11) x etapa 4 (23) x filtro Sallen-Key (1) = 253
-// Con RG = 5,8 kohm el INA333 pasa a 18,2 y el total a ~420.
 const float GANANCIA_TOTAL = 253.0;
 
 // ---------- Detección de la mirada ----------
-// Umbral en milivolts EN LOS ELECTRODOS. En la captura medida, un movimiento
-// dio de 0,55 a 0,87 mV. Con 0,30 mV hay margen contra el ruido y los
-// movimientos chicos no disparan.
+// Umbral en milivolts EN LOS ELECTRODOS. 
 const float UMBRAL_MV = 0.30;
 
 // Signo: +1 si al mirar a la DERECHA la salida SUBE; -1 si BAJA.
-// Depende de qué electrodo está en VIN+ y cuál en VIN-. Si el giro sale al
-// revés, cambiá este valor.
+// Depende de qué electrodo está en VIN+ y cuál en VIN-. 
 const int SIGNO_DERECHA = +1;
 
-// La señal tiene que quedar pasada del umbral este tiempo para contar. Menos
-// tiempo = la silla responde antes, pero un parpadeo puede mover la silla un
-// instante. Con 50 ms la demora total desde la mirada es de unos 70 ms.
+// La señal tiene que quedar pasada del umbral este tiempo para contar. 
+// Menos tiempo = la silla responde antes, pero un parpadeo puede mover la silla un
+// instante.
 const unsigned long CONFIRMACION_MS = 50;
 
 // Modo de giro:
@@ -127,16 +68,14 @@ const int   N_PROMEDIO = 8;              // lecturas por muestra (~0,9 ms)
 const float FREC_RED = 50.0;             // 50 Hz en Argentina
 const float Q_NOTCH  = 10.0;
 const int   N_SUAVIZADO = 4;             // promedio móvil (máximo 16): 4 muestras = 16 ms
-
 // ---------- Otros ----------
 const long BAUDIOS = 115200;
 const int  PIN_ENTRADA_ADC = A0;
 const int  LED_AVISO = LED_BUILTIN;      // titila al calibrar, fijo si satura
 const int  TELEMETRIA_CADA = 5;          // 1 línea cada 5 muestras = 50 por segundo
 
-
 // =====================================================================
-//  VARIABLES INTERNAS (no hace falta tocarlas)
+//  VARIABLES INTERNAS
 // =====================================================================
 
 const unsigned long PERIODO_US = (unsigned long)(1000000.0 / FS_HZ);
@@ -164,7 +103,6 @@ unsigned long t_saturado = 0;
 int   contTelemetria = 0;
 float kDeriva;
 
-
 // =====================================================================
 //  Motores
 // =====================================================================
@@ -184,7 +122,6 @@ void motores(int o) {
   analogWrite(PIN_ENA, VELOCIDAD_PWM);
   analogWrite(PIN_ENB, VELOCIDAD_PWM);
 }
-
 bool habilitado() {
   if (bloqueado) return false;
   if (!USAR_HABILITACION) return true;
@@ -197,12 +134,10 @@ void reiniciarFiltros() {
   sumaSuav = 0;
   idxSuav = 0;
 }
-
 void cambiarEstado(Estado e, unsigned long ahora) {
   estado = e;
   t_estado = ahora;
 }
-
 
 // =====================================================================
 //  setup()
@@ -238,7 +173,6 @@ void setup() {
   Serial.println("# EOG silla: arrancando");
 }
 
-
 // =====================================================================
 //  Comandos por el puerto serie
 // =====================================================================
@@ -258,7 +192,6 @@ void leerComandos(unsigned long ahora) {
     }
   }
 }
-
 
 // =====================================================================
 //  loop()
@@ -408,3 +341,4 @@ void loop() {
     Serial.print(",Orden:");     Serial.println(orden);
   }
 }
+
